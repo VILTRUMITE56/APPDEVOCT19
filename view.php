@@ -1,44 +1,79 @@
 <?php
-require "db.php";
-require "functions/view.php";
 
-$owners = viewOwnersWithPets($pdo);
-?>
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <title>View Owners and Pets</title>
-    <link rel="stylesheet" href="style.css">
-</head>
-<body>
-    <h1>Owners and Their Pets (View)</h1>
-    <div class="nav"><a href="index.php">Home</a> | <a href="owners.php">Owners</a> | <a href="pets.php">Pets</a></div>
+// Return all owners in display order.
+function viewOwners(PDO $pdo): array
+{
+    $stmt = $pdo->query('SELECT owner_id, owner_name, phone, email FROM pet_owners ORDER BY owner_id');
+    return $stmt->fetchAll();
+}
 
-    <?php foreach ($owners as $o): ?>
-        <h2><?php echo htmlspecialchars($o['owner_name']); ?></h2>
-        <p>Phone: <?php echo htmlspecialchars($o['phone']); ?> | Email: <?php echo htmlspecialchars($o['email']); ?></p>
-        <?php if (empty($o['pets'])): ?>
-            <p><em>No pets registered for this owner.</em></p>
-        <?php else: ?>
-            <table>
-                <tr><th>Pet ID</th><th>Pet Name</th><th>Species</th><th>Breed</th><th>Grooming Date</th><th>Status</th></tr>
-                <?php foreach ($o['pets'] as $p): ?>
-                <tr>
-                    <td><?php echo $p['pet_id']; ?></td>
-                    <td><?php echo htmlspecialchars($p['pet_name']); ?></td>
-                    <td><?php echo htmlspecialchars($p['species']); ?></td>
-                    <td><?php echo htmlspecialchars($p['breed']); ?></td>
-                    <td><?php echo htmlspecialchars($p['grooming_date'] ?? ''); ?></td>
-                    <td><?php echo htmlspecialchars($p['status'] ?? ''); ?></td>
-                </tr>
-                <?php endforeach; ?>
-            </table>
-        <?php endif; ?>
-    <?php endforeach; ?>
+// Find an owner for an edit form; return null for a well-formed missing ID.
+function getOwner(PDO $pdo, $ownerId): ?array
+{
+    $id = validateRecordId($ownerId, 'owner');
+    $stmt = $pdo->prepare('SELECT owner_id, owner_name, phone, email FROM pet_owners WHERE owner_id = :owner_id');
+    $stmt->execute(['owner_id' => $id]);
+    $owner = $stmt->fetch();
+    return $owner === false ? null : $owner;
+}
 
-    <?php if (empty($owners)): ?>
-        <p>No owners found.</p>
-    <?php endif; ?>
-</body>
-</html>
+// Return pets with their associated owner names for the management page.
+function viewPets(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        'SELECT p.pet_id, p.pet_name, p.species, p.breed, p.grooming_date, p.status, '
+        . 'p.owner_id, o.owner_name FROM pets p '
+        . 'INNER JOIN pet_owners o ON o.owner_id = p.owner_id ORDER BY p.pet_id'
+    );
+    return $stmt->fetchAll();
+}
+
+// Find a pet for an edit form; return null for a well-formed missing ID.
+function getPet(PDO $pdo, $petId): ?array
+{
+    $id = validateRecordId($petId, 'pet');
+    $stmt = $pdo->prepare(
+        'SELECT pet_id, pet_name, species, breed, grooming_date, status, owner_id FROM pets WHERE pet_id = :pet_id'
+    );
+    $stmt->execute(['pet_id' => $id]);
+    $pet = $stmt->fetch();
+    return $pet === false ? null : $pet;
+}
+
+// Retrieve owners and pets together while retaining owners with no pets.
+function viewOwnersWithPets(PDO $pdo): array
+{
+    $stmt = $pdo->query(
+        'SELECT o.owner_id, o.owner_name, o.phone, o.email, '
+        . 'p.pet_id, p.pet_name, p.species, p.breed, p.grooming_date, p.status '
+        . 'FROM pet_owners o LEFT JOIN pets p ON p.owner_id = o.owner_id '
+        . 'ORDER BY o.owner_id, p.pet_id'
+    );
+
+    $owners = [];
+    while ($row = $stmt->fetch()) {
+        $ownerId = (int) $row['owner_id'];
+        if (!isset($owners[$ownerId])) {
+            $owners[$ownerId] = [
+                'owner_id' => $ownerId,
+                'owner_name' => $row['owner_name'],
+                'phone' => $row['phone'],
+                'email' => $row['email'],
+                'pets' => [],
+            ];
+        }
+
+        if ($row['pet_id'] !== null) {
+            $owners[$ownerId]['pets'][] = [
+                'pet_id' => $row['pet_id'],
+                'pet_name' => $row['pet_name'],
+                'species' => $row['species'],
+                'breed' => $row['breed'],
+                'grooming_date' => $row['grooming_date'],
+                'status' => $row['status'],
+            ];
+        }
+    }
+
+    return array_values($owners);
+}
